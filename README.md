@@ -23,6 +23,7 @@ https://arxiv.org/abs/2410.05777
 1. [Introduction](#Introduction)
 2. [Reproducing the Experiments](#reproducing-the-experiments)
 3. [Code Highlights](#code-highlights)
+4. [Citation](#citation)
 
 
 ## Introduction
@@ -133,5 +134,18 @@ We demonstrate the effectiveness of our model by comparing it with classical con
     
 
 
+## Citation
+```bibtex
+@ARTICLE{11303607,
+  author={Lizzio Bosco, Daniele and Portelli, Beatrice and Serra, Giuseppe},
+  journal={IEEE Transactions on Quantum Engineering}, 
+  title={Integrated Encoding and Quantization to Enhance Quanvolutional Neural Networks}, 
+  year={2025},
+  volume={},
+  number={},
+  pages={1-20},
+  keywords={Encoding;Quantization (signal);Integrated circuit modeling;Qubit;Image coding;Quantum circuit;Neural networks;Quantum state;Logic gates;Convolutional neural networks;Convolutional neural networks;image processing;NISQ;quantum computing;quantum encoding;quantum machine learning;quanvolutional neural network},
+  doi={10.1109/TQE.2025.3646040}}
 
+```
 
