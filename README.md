@@ -149,3 +149,107 @@ We demonstrate the effectiveness of our model by comparing it with classical con
 
 ```
 
+## Local Paper-Baseline Setup
+
+This project was imported from the authors' repository at:
+
+https://github.com/Dan-LB/integrated_encoding_for_QuanvNN
+
+The imported revision is `0466647`. The `paper-baseline` branch preserves that
+revision and must remain unchanged. The `improved-model` branch is reserved for
+future research changes. No training or analysis has been run during setup.
+
+### Environment
+
+The authors specify Python `3.10.12`. Install the exact package versions from
+`requirements.txt`; do not upgrade them for baseline work. The requirements
+include the authors' versions of Qiskit `1.1.0`, Qiskit Aer `0.14.1`, PyTorch
+`2.3.0`, torchvision `0.18.0`, NumPy `2.1.0`, SciPy `1.14.1`, Matplotlib
+`3.9.2`, PyYAML `6.0.1`, pandas `2.2.2`, Pillow `10.4.0`, scikit-image
+`0.24.0`, and tqdm `4.66.4`.
+
+Create and activate a Python 3.10.12 environment, then install the pinned
+requirements:
+
+```powershell
+py -3.10 -m venv venv
+.\venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+```
+
+The commands above are setup instructions only; they were not run as part of
+this import.
+
+### MiraBest Data
+
+`utils/get_dataset/dataset_Mirabest.py` calls `MiraBest(root='./dataMirabest',
+train=..., download=True, ...)`. The expected source is the authors' archive
+`MiraBest_basic_batches.tar.gz`, containing `dataMirabest/batches/` with the
+pickle files `data_batch_1` through `data_batch_9`, `test_batch`, and
+`batches.meta`. The loader expects each batch to contain image data and labels,
+and verifies the authors' MD5 checksums.
+
+The loader reads 150×150 single-channel images, converts them to grayscale PIL
+images, converts them to tensors, and resizes them to 30×30. The model input
+shape is therefore `(1, 30, 30)` and MiraBest is treated as a two-class
+classification task. The repository does not contain the dataset, and no data
+was fabricated or downloaded during setup.
+
+### Original Experiment Matrix
+
+The existing `configs/` directory already contains the complete matrix:
+
+- `CNN.yaml`
+- `QNN-Rot-k2.yaml`, `QNN-Rot-k3.yaml`, `QNN-Rot-k4.yaml`
+- `QNN-Int-Simple-k2.yaml` through `QNN-Int-Simple-k5.yaml`
+- `QNN-Int-RndMul-k2.yaml` through `QNN-Int-RndMul-k5.yaml`
+- `QNN-Int-RndLin-k2.yaml` through `QNN-Int-RndLin-k5.yaml`
+
+`main.py` uses MiraBest by default, quantization level `50`, eight quanvolution
+channels, ten seeds, and 1000 epochs. It iterates over every YAML file in
+`configs/`, so the original command runs the full matrix rather than a single
+model:
+
+```powershell
+python main.py
+python process_results.py
+```
+
+These commands have not been run. Original output is written below `exps/` and
+processed summaries below `results/`; no baseline accuracy, runtime, warning,
+or checkpoint result is currently available.
+
+### Activation Parameter
+
+`constants.py` defines the supported activation names. In the integrated
+builder, `activation` controls the angle applied to each encoded pixel value:
+`Full` uses `2*pi*beta*x`, `Half` uses `pi*beta*x`, `Shifted` adds `pi/2`,
+`Random` adds a random phase, and `Fixed` uses `pi*x`. In the rotational
+builder, the original implementation supports `Full` and `Half`.
+
+The checked-in paper configurations use `Fixed` for Int-Simple, `Full` for
+Int-RndMul, `Random` for Int-RndLin, and `Half` for QNN-Rot. The setting is in
+each YAML file's `quanv.activation` field and is part of the circuit encoding
+definition, not a classical neural-network activation function.
+
+### Important Files
+
+- `main.py`: original multi-seed training and quanvolution preprocessing driver.
+- `quanvs/Quanvolutional_Layer.py`: original Torch quanvolutional layer and patch lookup.
+- `quanvs/circuit_builder.py`: original integrated and rotational circuit builders.
+- `quanvs/model_builder.py`: original classical CNN and model composition.
+- `constants.py`: original enums, including encodings and activation names.
+- `utils/get_dataset/dataset_Mirabest.py` and `data/MiraBest.py`: original MiraBest loader.
+- `utils/train_and_test.py`: original training and test loops.
+- `process_results.py`: original aggregation and CSV generation.
+- `Compute_quantization_error.ipynb`, `Compute_quantization_reduction.ipynb`, and `Compute_expressibility.ipynb`: author-provided analyses.
+
+These files and the YAML configurations belong to the paper implementation
+and should remain unchanged for baseline work. Future modifications belong on
+`improved-model`, with experiment outputs separated as
+`results/paper_baseline/` and `results/improved_model/`.
+
+The repository contains no patch-distribution/PCA analysis. That would be new
+analysis and must be kept separate from the author-provided notebooks.
+

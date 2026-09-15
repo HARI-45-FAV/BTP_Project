@@ -1,138 +1,730 @@
+# main.py
+import json
 import os
+import random
+from typing import Any, cast
 
 import numpy as np
 import torch
 import torch.optim as optim
-
+from torch.utils.data import DataLoader
 
 from quanvs.model_builder import CNN
 from quanvs.Quanvolutional_Layer import QuanvolutionalLayer
 from quanvs.model_builder import stack_quanv_on_top
 
 from utils.read_config import load_config
-
 from utils.get_dataset.dataset_Mirabest import get_MiraBest_binary
 from utils.get_dataset.dataset_LArTPC import get_LArTPC_full
 
 from utils.train_and_test import train, test
+from quanvs.quanv_util import analyze_training_patches
 
 
-#Set to DEBUG_MODE = False to run the full experiment
+# ============================================================
+# EXPERIMENT SETTINGS
+# ============================================================
+
 DEBUG_MODE = False
-
-#Select the task from ["MiraBest", "LArTPC"]
 SELECTED_TASK = "MiraBest"
 
+# Run the complete fair comparison in one invocation.
+# CNN is the unchanged classical baseline; the two QNN variants share the
+# same data-aware quantum preprocessing procedure.
+CONFIGURATIONS_TO_RUN = (
+    "CNN",
+    "QNN-Int-Simple-k3",
+    "QNN-Int-RndMul-k3",
+)
 
-seeds = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+# Ten independent classical seeds.
+SEEDS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
 
-# Constants used in this work
-quantization = 50
-n_quanv_channels = 8
+# Fallback only when adaptive quantization is disabled.
+QUANTIZATION = 50
 
-epochs = 1000
-lr = 0.0003
+# Quanvolutional output channels.
+N_QUANV_CHANNELS = 8
 
-for seed in seeds:
-    #set random seed for reproducibility
-    torch.manual_seed(seed)
+# Final-comparison training budget.
+# Keep the same budget for CNN, Simple and RndMul.
+EPOCHS = 1000
+
+LEARNING_RATE = 0.0003
+
+# One fixed quantum seed shared by all classical seeds.
+QUANTUM_SEED = 2026
+
+
+# ============================================================
+# RESEARCH METHOD SETTINGS
+# ============================================================
+
+RESEARCH_CONFIG = {
+    # Accuracy-first policy:
+    # ------------------------------------------------------------
+    # We keep the original N=50 information fidelity for the final
+    # comparison. Lowering N or replacing exact cache hits by approximate
+    # prototype reuse can change the quantum features in ways that are not
+    # reliably accuracy-preserving. Those ideas remain available for later
+    # resource-efficiency ablations.
+    "adaptive_quantization": False,
+    "quantization_levels": (10, 25, 50),
+
+    # Exact memoization is safe because identical quantized patches receive
+    # exactly the same fixed quantum computation. Approximate reuse is off in
+    # the accuracy-first run.
+    "similarity_memoization": False,
+    "similarity_threshold": 0.05,
+    "similarity_coarse_levels": 8,
+    "max_prototypes_per_bucket": 32,
+    "similarity_validation_limit": 0,
+    "similarity_output_tolerance": 0.05,
+
+    # 3) Diversity-aware selection of the eight quantum filters.
+    # More candidates + stronger screening gives the selector a better chance
+    # of finding useful and non-redundant filters without changing the final
+    # architecture (still exactly 8 output channels).
+    "filter_selection": True,
+    "filter_candidates": 32,
+    "filter_screening_shots": 250,
+    "filter_quality_weight": 0.65,
+    "filter_diversity_weight": 0.35,
+
+    # 4) Global training-derived information-aware gate allocation.
+    # Every feature still appears at least once and L stays fixed by YAML.
+    "information_aware_gates": True,
+
+    # Keep the final quantum feature measurement at the configured 1000 shots
+    # for accuracy/reproducibility. Adaptive shot reduction is a resource
+    # experiment, not part of the accuracy-first result.
+    "adaptive_shots": False,
+    "shots_by_level": {
+        10: 250,
+        25: 500,
+        50: 1000,
+    },
+
+    "quantum_seed": QUANTUM_SEED,
+}
+
+
+# ============================================================
+# OUTPUT DIRECTORY
+# ============================================================
+
+TASK_PATH = f"exps/{SELECTED_TASK}"
+os.makedirs(TASK_PATH, exist_ok=True)
+
+
+# ============================================================
+# REPRODUCIBILITY
+# ============================================================
+
+def set_classical_seed(seed):
+    random.seed(seed)
     np.random.seed(seed)
+    torch.manual_seed(seed)
+
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
 
 
-    task_path = f"exps/{SELECTED_TASK}"
-    if not os.path.exists(task_path):
-        os.makedirs(task_path)
+def make_seeded_loader(dataset, batch_size, seed, shuffle):
+    generator = torch.Generator()
+    generator.manual_seed(int(seed))
 
-    # The results will be saved in a folder called "exps" in the root directory
+    return DataLoader(
+        dataset,
+        batch_size=batch_size,
+        shuffle=shuffle,
+        generator=generator,
+        pin_memory=torch.cuda.is_available(),
+    )
 
+
+# ============================================================
+# CLASSICAL TRAINING
+# ============================================================
+
+def run_classical_training(
+    model,
+    device,
+    train_dataset,
+    test_dataset,
+    batch_size,
+    seed,
+    optimizer,
+    seed_path,
+):
+    """
+    Final-comparison training:
+      - full original training set
+      - no validation split
+      - no early stopping
+      - same epoch budget for every classical seed
+      - diagnostic test evaluation every 25 epochs and at the end
+    """
+    set_classical_seed(seed)
+
+    train_loader = make_seeded_loader(
+        train_dataset,
+        batch_size,
+        seed,
+        shuffle=True,
+    )
+
+    test_loader = make_seeded_loader(
+        test_dataset,
+        batch_size,
+        seed,
+        shuffle=False,
+    )
+
+    data_lines = [
+        "epoch,train_loss,train_acc,test_loss,test_acc\n"
+    ]
+
+    for epoch in range(1, EPOCHS + 1):
+        train_loss, train_acc = train(
+            model,
+            device,
+            train_loader,
+            optimizer,
+            epoch,
+            verbose=False,
+        )
+
+        # Keep the test set out of the inner loop for most epochs.
+        # For the final comparison, inspect it only every 25 epochs and at
+        # the final epoch. The selected report metric remains final epoch.
+        if epoch == 1 or epoch % 25 == 0 or epoch == EPOCHS:
+            test_loss, test_acc = test(
+                model,
+                device,
+                test_loader,
+                verbose=False,
+            )
+
+            data_lines.append(
+                f"{epoch},{train_loss},{train_acc},"
+                f"{test_loss},{test_acc}\n"
+            )
+
+            print(
+                f"Seed {seed} | "
+                f"Epoch {epoch}/{EPOCHS} | "
+                f"Train loss: {train_loss:.4f} | "
+                f"Train acc: {train_acc:.2f}% | "
+                f"Test acc: {test_acc:.2f}%"
+            )
+        else:
+            # Record train-only progress without touching the test set.
+            data_lines.append(
+                f"{epoch},{train_loss},{train_acc},,\n"
+            )
+
+    final_test_loss, final_test_acc = test(
+        model,
+        device,
+        test_loader,
+        verbose=True,
+    )
+
+    with open(
+        os.path.join(seed_path, "losses.txt"),
+        "w",
+        encoding="utf-8",
+    ) as f:
+        f.writelines(data_lines)
+
+    with open(
+        os.path.join(seed_path, "selected_metrics.txt"),
+        "w",
+        encoding="utf-8",
+    ) as f:
+        f.write("selection_protocol=final_epoch\n")
+        f.write(f"final_epoch={EPOCHS}\n")
+        f.write(f"final_test_loss={final_test_loss}\n")
+        f.write(f"final_test_accuracy={final_test_acc}\n")
+
+    return final_test_loss, final_test_acc
+
+
+# ============================================================
+# DATASET
+# ============================================================
+
+def load_dataset():
     if SELECTED_TASK == "LArTPC":
-        train_loader, test_loader, info = get_LArTPC_full(downscale = True, autocrop = False)
-    elif SELECTED_TASK == "MiraBest":
-        train_loader, test_loader, info = get_MiraBest_binary()
+        return get_LArTPC_full(
+            downscale=True,
+            autocrop=False,
+        )
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    folder = "configs"
+    if SELECTED_TASK == "MiraBest":
+        return get_MiraBest_binary()
 
-    # For each configuration file in the folder, the script will train a model
-    for file in os.listdir(folder):
-            config_name = file
-            config_name = config_name.split(".")[0]
+    raise ValueError(
+        f"Unknown task: {SELECTED_TASK}. "
+        f"Use 'MiraBest' or 'LArTPC'."
+    )
 
-            file_path = f"{folder}/{config_name}"
-            encoding, quanv_config, _, model_config = load_config(file_path)
 
-            if SELECTED_TASK == "LArTPC":
-                out_features = 7
-            elif SELECTED_TASK == "MiraBest":
-                out_features = 2
+# ============================================================
+# MAIN
+# ============================================================
 
-            model_config['fc2']['out_features'] = out_features # Set the number of output features
+def main():
+    device = torch.device(
+        "cuda" if torch.cuda.is_available() else "cpu"
+    )
 
-            model = CNN(device=device, config=model_config)
-            model.to(device)
+    print("\n" + "=" * 70)
+    print(f"TASK: {SELECTED_TASK}")
+    print(f"DEVICE: {device}")
 
-            print(f"Working on {config_name} for {SELECTED_TASK}")
+    if device.type == "cuda":
+        print(f"GPU: {torch.cuda.get_device_name(0)}")
 
-            if not os.path.exists(f"{task_path}/{config_name}"):
-                os.makedirs(f"{task_path}/{config_name}")
+    print(f"CONFIGURATIONS: {CONFIGURATIONS_TO_RUN}")
+    print(f"CLASSICAL SEEDS: {SEEDS}")
+    print(f"FIXED QUANTUM SEED: {QUANTUM_SEED}")
+    print(f"EPOCHS: {EPOCHS}")
+    print("=" * 70)
 
-            if quanv_config is not None:
-                # build the quanvolutional layer
-                act = quanv_config['activation']
-                kernel_size = quanv_config['kernel_size']
-                padding = (float(kernel_size)-1)/2
-                layer = QuanvolutionalLayer(1, n_quanv_channels, kernel_size=kernel_size, 
-                                            stride=1, padding=padding,
-                                            quantization=quantization,
-                                            encoding_approach=encoding,
-                                            encoding_config=quanv_config,
-                                            )
+    train_loader, test_loader, _ = load_dataset()
 
-                # stack the quanvolutional layer on top of the classical model
-                model = stack_quanv_on_top(layer, model)
-                model.to(device)
+    if train_loader is None or test_loader is None:
+        raise RuntimeError(
+            "Training or test loader could not be created."
+        )
+
+    train_dataset = cast(Any, train_loader.dataset)
+    test_dataset = cast(Any, test_loader.dataset)
+
+    print(
+        f"Training samples: {len(train_dataset)} | "
+        f"Test samples: {len(test_dataset)}"
+    )
+
+    config_folder = "configs"
+
+    if not os.path.isdir(config_folder):
+        raise FileNotFoundError(
+            f"Configuration folder '{config_folder}' not found."
+        )
+
+    available_files = {
+        os.path.splitext(file)[0]: file
+        for file in os.listdir(config_folder)
+        if file.endswith((".yaml", ".yml"))
+    }
+
+    missing = [
+        name
+        for name in CONFIGURATIONS_TO_RUN
+        if name not in available_files
+    ]
+
+    if missing:
+        raise FileNotFoundError(
+            "Required configuration file(s) not found: "
+            + ", ".join(missing)
+        )
+
+    analysis = None
+
+    for config_name in CONFIGURATIONS_TO_RUN:
+        file = available_files[config_name]
+        file_path = os.path.join(config_folder, file)
+
+        print("\n" + "-" * 70)
+        print(f"Working on {config_name} for {SELECTED_TASK}")
+        print("-" * 70)
+
+        encoding, quanv_config, _, model_config = load_config(
+            file_path
+        )
+
+        model_config["fc2"]["out_features"] = (
+            2 if SELECTED_TASK == "MiraBest" else 7
+        )
+
+        config_path = os.path.join(
+            TASK_PATH,
+            config_name,
+        )
+        os.makedirs(config_path, exist_ok=True)
+
+        # ====================================================
+        # CNN BASELINE
+        # ====================================================
+
+        if quanv_config is None:
+            for seed in SEEDS:
+                print(f"Starting CNN seed={seed}")
+
+                set_classical_seed(seed)
+
+                model = CNN(
+                    device=device,
+                    config=model_config,
+                ).to(device)
+
+                optimizer = optim.Adam(
+                    model.parameters(),
+                    lr=LEARNING_RATE,
+                )
+
+                seed_path = os.path.join(
+                    config_path,
+                    f"seed_{seed}",
+                )
+                os.makedirs(seed_path, exist_ok=True)
 
                 if DEBUG_MODE:
-                    print("Debugging mode... skipping preprocessing")
+                    print(
+                        f"DEBUG_MODE=True -> skipping CNN "
+                        f"training for seed={seed}"
+                    )
                 else:
-                    p_train_loader_ = model.quanv_preprocess(train_loader, verbose = False)
-                    p_test_loader_ = model.quanv_preprocess(test_loader, verbose = False)
-                    model.preprocessed = True
-            
-            else:
-                p_train_loader_ = train_loader
-                p_test_loader_ = test_loader
+                    _, final_test_acc = run_classical_training(
+                        model=model,
+                        device=device,
+                        train_dataset=train_dataset,
+                        test_dataset=test_dataset,
+                        batch_size=train_loader.batch_size,
+                        seed=seed,
+                        optimizer=optimizer,
+                        seed_path=seed_path,
+                    )
 
+                    print(
+                        f"CNN seed={seed}: "
+                        f"final_test_accuracy="
+                        f"{final_test_acc:.4f}%"
+                    )
 
-            optimizer = optim.Adam(model.parameters(), lr=lr)
+                with open(
+                    os.path.join(
+                        seed_path,
+                        "experiment_settings.txt",
+                    ),
+                    "w",
+                    encoding="utf-8",
+                ) as f:
+                    f.write(f"Task: {SELECTED_TASK}\n")
+                    f.write(f"Model: {config_name}\n")
+                    f.write(f"Seed: {seed}\n")
+                    f.write(f"Device: {device}\n")
+                    f.write(f"Epochs: {EPOCHS}\n")
+                    f.write(
+                        f"Learning rate: {LEARNING_RATE}\n"
+                    )
+                    f.write(
+                        "Training protocol: full original "
+                        "training split; no validation split; "
+                        "no early stopping.\n"
+                    )
+                    f.write(
+                        "Test metrics are reported at selected "
+                        "diagnostic epochs and final epoch.\n"
+                    )
 
-            #save model structure
-            with open(f"{task_path}/{config_name}/structure.txt", "w") as f:
-                f.write(str(model))
+            continue
 
-            if encoding is not None: 
-                with open(f"{task_path}/{config_name}/quanv_structure.txt", "w") as f:
-                    f.write(str(layer))
-                with open(f"{task_path}/{config_name}/quanv_encoding_config.txt", "w") as f:
-                    f.write(str(layer.encoding_config))
-                    f.write(str(layer.counters))
-                    f.write(str(quanv_config))
-                
+        # ====================================================
+        # RNDMUL TRAINING-ONLY ANALYSIS
+        # ====================================================
 
-            if not os.path.exists(f"{task_path}/{config_name}/seed_{seed}"):
-                os.makedirs(f"{task_path}/{config_name}/seed_{seed}")
+        if analysis is None:
+            kernel_size = int(
+                quanv_config["kernel_size"]
+            )
+            padding = int((kernel_size - 1) / 2)
 
-            data_lines = ["epoch,train_loss,train_acc,test_loss,test_acc\n"]
+            analysis_loader = DataLoader(
+                train_dataset,
+                batch_size=train_loader.batch_size,
+                shuffle=False,
+            )
+
+            print(
+                f"\nAnalyzing training patches for k={kernel_size} "
+                "(training data only)..."
+            )
+
+            analysis = analyze_training_patches(
+                analysis_loader,
+                kernel_size=kernel_size,
+                padding=padding,
+                stride=1,
+                max_calibration_patches=64,
+            )
+
+            print(
+                "Feature importance:",
+                analysis["feature_importance"].tolist(),
+            )
+
+            print(
+                "Adaptive quantization thresholds:",
+                analysis["quantization_thresholds"],
+            )
+
+        # ====================================================
+        # FIXED QUANTUM FEATURE EXTRACTOR
+        # ====================================================
+
+        kernel_size = int(quanv_config["kernel_size"])
+        padding = int((kernel_size - 1) / 2)
+
+        layer = QuanvolutionalLayer(
+            in_channels=1,
+            out_channels=N_QUANV_CHANNELS,
+            kernel_size=kernel_size,
+            stride=1,
+            padding=padding,
+            quantization=QUANTIZATION,
+            encoding_approach=encoding,
+            encoding_config=quanv_config,
+            research_config=RESEARCH_CONFIG,
+            feature_importance=analysis["feature_importance"],
+            quantization_thresholds=analysis[
+                "quantization_thresholds"
+            ],
+            filter_calibration_patches=analysis[
+                "calibration_patches"
+            ],
+            filter_calibration_labels=analysis[
+                "calibration_labels"
+            ],
+        )
+
+        preprocessing_cnn = CNN(
+            device=device,
+            config=model_config,
+        )
+
+        preprocessing_model = stack_quanv_on_top(
+            layer,
+            preprocessing_cnn,
+        )
+
+        if DEBUG_MODE:
+            print(
+                "DEBUG_MODE=True -> skipping QNN preprocessing "
+                "and training."
+            )
+            continue
+
+        print("\nRunning ONE quantum preprocessing pass...")
+
+        preprocessed_train_loader = (
+            preprocessing_model.quanv_preprocess(
+                DataLoader(
+                    train_dataset,
+                    batch_size=train_loader.batch_size,
+                    shuffle=False,
+                ),
+                verbose=False,
+            )
+        )
+
+        preprocessed_test_loader = (
+            preprocessing_model.quanv_preprocess(
+                DataLoader(
+                    test_dataset,
+                    batch_size=test_loader.batch_size,
+                    shuffle=False,
+                ),
+                verbose=False,
+            )
+        )
+
+        preprocessed_train_dataset = (
+            preprocessed_train_loader.dataset
+        )
+        preprocessed_test_dataset = (
+            preprocessed_test_loader.dataset
+        )
+
+        preprocessing_model.preprocessed = True
+
+        with open(
+            os.path.join(
+                config_path,
+                "research_method.json",
+            ),
+            "w",
+            encoding="utf-8",
+        ) as f:
+            json.dump(
+                {
+                    "task": SELECTED_TASK,
+                    "model": config_name,
+                    "quantum_seed": QUANTUM_SEED,
+                    "classical_seeds": SEEDS,
+                    "epochs": EPOCHS,
+                    "research_config": RESEARCH_CONFIG,
+                    "feature_importance": analysis[
+                        "feature_importance"
+                    ].tolist(),
+                    "quantization_thresholds": analysis[
+                        "quantization_thresholds"
+                    ],
+                    "num_training_patches_analyzed": analysis[
+                        "num_training_patches"
+                    ],
+                    "filter_selection_summary": (
+                        layer.filter_selection_summary
+                    ),
+                    "counters": layer.counters,
+                },
+                f,
+                indent=2,
+            )
+
+        with open(
+            os.path.join(
+                config_path,
+                "structure.txt",
+            ),
+            "w",
+            encoding="utf-8",
+        ) as f:
+            f.write(str(preprocessing_model))
+
+        with open(
+            os.path.join(
+                config_path,
+                "quanv_structure.txt",
+            ),
+            "w",
+            encoding="utf-8",
+        ) as f:
+            f.write(str(layer))
+
+        with open(
+            os.path.join(
+                config_path,
+                "quanv_encoding_config.txt",
+            ),
+            "w",
+            encoding="utf-8",
+        ) as f:
+            f.write(str(layer.encoding_config))
+            f.write("\n")
+            f.write(str(layer.counters))
+            f.write("\n")
+            f.write(str(quanv_config))
+            f.write("\n")
+            f.write(str(layer.filter_selection_summary))
+
+        # ====================================================
+        # TEN CLASSICAL RUNS ON SAME FIXED QUANTUM FEATURES
+        # ====================================================
+
+        for seed in SEEDS:
+            print(
+                f"Starting {config_name}, seed={seed} "
+                "(quantum preprocessing reused)"
+            )
+
+            set_classical_seed(seed)
+
+            model = CNN(
+                device=device,
+                config=model_config,
+            )
+
+            model = stack_quanv_on_top(
+                layer,
+                model,
+            )
+
+            model.preprocessed = True
+            model.to(device)
+
+            optimizer = optim.Adam(
+                model.parameters(),
+                lr=LEARNING_RATE,
+            )
+
+            seed_path = os.path.join(
+                config_path,
+                f"seed_{seed}",
+            )
+            os.makedirs(seed_path, exist_ok=True)
+
+            with open(
+                os.path.join(
+                    seed_path,
+                    "experiment_settings.txt",
+                ),
+                "w",
+                encoding="utf-8",
+            ) as f:
+                f.write(f"Task: {SELECTED_TASK}\n")
+                f.write(f"Model: {config_name}\n")
+                f.write(f"Seed: {seed}\n")
+                f.write(f"Device: {device}\n")
+                f.write(
+                    "Quantum preprocessing: "
+                    "fixed/shared across seeds\n"
+                )
+                f.write(f"Quantum seed: {QUANTUM_SEED}\n")
+                f.write(
+                    "Training protocol: full original "
+                    "training split; no validation split; "
+                    "no early stopping.\n"
+                )
+                f.write(f"Epochs: {EPOCHS}\n")
+                f.write(
+                    f"Learning rate: {LEARNING_RATE}\n"
+                )
+
+                f.write("\nQuantum configuration:\n")
+                for key, value in quanv_config.items():
+                    f.write(f"{key}: {value}\n")
+
+                f.write("\nResearch configuration:\n")
+                for key, value in RESEARCH_CONFIG.items():
+                    f.write(f"{key}: {value}\n")
 
             if DEBUG_MODE:
-                print("Debugging mode... skipping training...")
+                print(
+                    f"DEBUG_MODE=True -> skipping seed={seed}"
+                )
             else:
-                for epoch in range(1, epochs + 1):
-                    train_loss, train_acc = train(model, device, p_train_loader_, optimizer, epoch)
-                    test_loss, test_acc = test(model, device, p_test_loader_)
-                    # Store each line in the list instead of writing to the file directly
-                    data_lines.append(f"{epoch},{train_loss},{train_acc},{test_loss},{test_acc}\n")
+                _, final_test_acc = run_classical_training(
+                    model=model,
+                    device=device,
+                    train_dataset=preprocessed_train_dataset,
+                    test_dataset=preprocessed_test_dataset,
+                    batch_size=train_loader.batch_size,
+                    seed=seed,
+                    optimizer=optimizer,
+                    seed_path=seed_path,
+                )
 
-            # Write all collected data to the file at once
-            with open(f"{task_path}/{config_name}/seed_{seed}/losses.txt", "w") as f:
-                f.writelines(data_lines)
+                print(
+                    f"{config_name} seed={seed}: "
+                    f"final_test_accuracy="
+                    f"{final_test_acc:.4f}%"
+                )
+
+            print(
+                f"Completed {config_name}, seed={seed} "
+                "(quantum preprocessing reused)"
+            )
+
+    print("\n" + "=" * 70)
+    print("CNN + QNN-Int-Simple-k3 + QNN-Int-RndMul-k3 COMPLETED")
+    print("=" * 70)
+
+
+if __name__ == "__main__":
+    main()

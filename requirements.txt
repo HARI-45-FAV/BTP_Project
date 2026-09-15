@@ -5,7 +5,7 @@ Pillow==10.4.0
 PyYAML==6.0.1
 qiskit==1.1.0
 qiskit_aer==0.14.1
-qiskit_aer_gpu==0.14.1
+#qiskit_aer_gpu==0.14.1
 qiskit_ibm_runtime==0.24.0
 scipy==1.14.1
 scikit-image==0.24.0

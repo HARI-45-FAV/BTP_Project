@@ -1,3 +1,4 @@
+#CNN.yaml
 model:
   conv1:
     in_channels: 1
@@ -9,7 +10,7 @@ model:
   fc1:
     out_features: 32
   fc2:
-    out_features: 7
+    out_features: 2
   input_shape:
   - 1
   - 30
