@@ -1,0 +1,111 @@
+{
+  "task": "MiraBest",
+  "model": "QNN-Int-RndMul-k3",
+  "quantum_seed": 2026,
+  "classical_seeds": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9
+  ],
+  "research_config": {
+    "adaptive_quantization": true,
+    "quantization_levels": [
+      10,
+      25,
+      50
+    ],
+    "similarity_memoization": true,
+    "similarity_threshold": 0.05,
+    "similarity_coarse_levels": 8,
+    "max_prototypes_per_bucket": 32,
+    "similarity_validation_limit": 32,
+    "similarity_output_tolerance": 0.075,
+    "filter_selection": true,
+    "filter_candidates": 16,
+    "filter_screening_shots": 100,
+    "filter_quality_weight": 0.4,
+    "filter_diversity_weight": 0.6,
+    "information_aware_gates": true,
+    "adaptive_shots": true,
+    "shots_by_level": {
+      "10": 250,
+      "25": 500,
+      "50": 1000
+    },
+    "quantum_seed": 2026
+  },
+  "feature_importance": [
+    0.111008959115979,
+    0.11110675704750456,
+    0.11106780920287934,
+    0.1111142205211437,
+    0.11121706895619396,
+    0.11117781467890048,
+    0.11104688355393096,
+    0.11114972949744135,
+    0.11111075742602673
+  ],
+  "quantization_thresholds": [
+    0.0,
+    3.070274573246934e-07
+  ],
+  "num_training_patches_analyzed": 623700,
+  "filter_selection_summary": {
+    "enabled": true,
+    "candidate_count": 16,
+    "selected_indices": [
+      14,
+      11,
+      5,
+      1,
+      10,
+      12,
+      2,
+      6
+    ],
+    "quality_scores": [
+      0.0031165945095486145,
+      0.0003670285373263893,
+      0.0014800846354166657,
+      0.0010892030164930573,
+      0.0007346679687499996,
+      0.003408044162326385,
+      0.0004632524956597208,
+      0.00033022352430555545,
+      0.0010680555555555562,
+      0.0013716509331597232,
+      0.00026143880208333336,
+      0.0018650759548611098,
+      0.004328690863715279,
+      0.0005134434678819452,
+      0.006820935329861113,
+      0.00037363715277777753
+    ],
+    "quality_weight": 0.4,
+    "diversity_weight": 0.6,
+    "screening_shots": 100,
+    "calibration_patches": 24
+  },
+  "counters": {
+    "images": 770,
+    "total_patches": 693000,
+    "unique_patches": 7853,
+    "quantum_executions": 62065,
+    "exact_cache_hits": 5379688,
+    "similarity_cache_hits": 102279,
+    "similarity_validations": 32,
+    "similarity_validation_failures": 1,
+    "similarity_prototypes": 2328,
+    "screening_executions": 384,
+    "shots_250": 8,
+    "shots_500": 8,
+    "shots_1000": 62049
+  }
+}

@@ -1,0 +1,4 @@
+{'L': 18, 'activation': 'Fixed', 'kernel_size': 3, 'n_qubits': 4, 'n_shots': 1000}
+{'images': 770, 'total_patches': 693000, 'unique_patches': 20537, 'quantum_executions': 164296, 'exact_cache_hits': 5379704, 'similarity_cache_hits': 0, 'similarity_validations': 0, 'similarity_validation_failures': 0, 'similarity_prototypes': 0, 'screening_executions': 2048, 'shots_250': 0, 'shots_500': 0, 'shots_1000': 164296}
+{'L': 18, 'activation': 'Fixed', 'kernel_size': 3, 'n_qubits': 4, 'n_shots': 1000}
+{'enabled': True, 'candidate_count': 32, 'selected_indices': [0, 1, 2, 3, 4, 5, 6, 7], 'selected_quality_scores': [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], 'quality_scores': [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0], 'quality_weight': 0.65, 'diversity_weight': 0.35, 'screening_shots': 250, 'calibration_patches': 64}

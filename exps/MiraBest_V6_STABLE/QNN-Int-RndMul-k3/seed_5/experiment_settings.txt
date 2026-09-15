@@ -1,0 +1,35 @@
+Task: MiraBest
+Model: QNN-Int-RndMul-k3
+Seed: 5
+Device: cuda
+Quantum preprocessing: fixed/shared across seeds
+Quantum seed: 2026
+Training protocol: full training split, no validation split, no early stopping
+Epochs: 1000
+Learning rate: 0.0003
+
+Quantum configuration:
+L: 18
+activation: Full
+kernel_size: 3
+n_qubits: 4
+n_shots: 1000
+
+Research configuration:
+adaptive_quantization: True
+quantization_levels: (10, 25, 50)
+similarity_memoization: True
+similarity_threshold: 0.05
+similarity_coarse_levels: 8
+max_prototypes_per_bucket: 32
+similarity_validation_limit: 32
+similarity_output_tolerance: 0.075
+filter_selection: True
+filter_candidates: 16
+filter_screening_shots: 100
+filter_quality_weight: 0.4
+filter_diversity_weight: 0.6
+information_aware_gates: True
+adaptive_shots: True
+shots_by_level: {10: 250, 25: 500, 50: 1000}
+quantum_seed: 2026

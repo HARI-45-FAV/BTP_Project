@@ -1,0 +1,5 @@
+selection_protocol=final_epoch
+final_epoch=1000
+test_evaluation_interval=25
+final_test_loss=1.0332862525791318
+final_test_accuracy=76.62337662337663

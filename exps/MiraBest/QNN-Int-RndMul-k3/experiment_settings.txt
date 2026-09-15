@@ -1,0 +1,14 @@
+Task: MiraBest
+Seed: 9
+Device: cuda
+Quantization: N=50
+Quanvolutional channels: 8
+Epochs: 1000
+Learning rate: 0.0003
+
+Quantum configuration:
+L: 18
+activation: Full
+kernel_size: 3
+n_qubits: 4
+n_shots: 1000

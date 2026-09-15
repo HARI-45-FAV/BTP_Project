@@ -1,0 +1,8 @@
+Task: MiraBest
+Model: CNN
+Seed: 3
+Device: cuda
+Epochs: 1000
+Learning rate: 0.0003
+Training protocol: full original training split; no validation split; no early stopping.
+Test metrics are reported at selected diagnostic epochs and final epoch.

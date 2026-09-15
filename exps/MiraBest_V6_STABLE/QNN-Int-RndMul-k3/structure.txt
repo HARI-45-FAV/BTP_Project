@@ -1,0 +1,11 @@
+QuanvNN(
+  (quanv): QuanvolutionalLayer()
+  (classical_component): CNN(
+    (conv1): Conv2d(8, 16, kernel_size=(3, 3), stride=(1, 1))
+    (pool): MaxPool2d(kernel_size=2, stride=2, padding=0, dilation=1, ceil_mode=False)
+    (dropout_conv): Dropout(p=0.2, inplace=False)
+    (dropout_fn): Dropout(p=0.2, inplace=False)
+    (fc1): Linear(in_features=3136, out_features=32, bias=True)
+    (fc2): Linear(in_features=32, out_features=2, bias=True)
+  )
+)
