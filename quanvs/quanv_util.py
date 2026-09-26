@@ -25,7 +25,7 @@ def default_encoding_config(encoding_approach):
         return {
             "kernel_size": 3,
             "n_qubits": 4,
-            "L": 25,
+            "L": 18,
             "activation": constants.QuanvActivation.FULL.value,
             "n_shots": 1000,
         }
@@ -151,11 +151,30 @@ def adaptive_quantization_level(complexity, thresholds, levels=(10, 25, 50)):
     thresholds must contain two values: (low_to_medium, medium_to_high).
     """
     levels = tuple(sorted(int(x) for x in levels))
-    if len(levels) != 3:
-        raise ValueError("Exactly three quantization levels are required.")
+    if len(levels) != 3 or len(set(levels)) != 3:
+        raise ValueError(
+            "Adaptive quantization requires three distinct quantization levels."
+        )
+    if any(level < 2 for level in levels):
+        raise ValueError("Quantization levels must be at least 2.")
 
-    low_threshold, high_threshold = thresholds
+    if thresholds is None or len(thresholds) != 2:
+        raise ValueError(
+            "Adaptive quantization requires exactly two training-derived thresholds."
+        )
+
+    low_threshold = float(thresholds[0])
+    high_threshold = float(thresholds[1])
     complexity = float(complexity)
+
+    if not np.isfinite(complexity):
+        raise ValueError("Patch complexity must be finite.")
+    if not np.isfinite(low_threshold) or not np.isfinite(high_threshold):
+        raise ValueError("Quantization thresholds must be finite.")
+    if high_threshold <= low_threshold:
+        raise ValueError(
+            "High quantization threshold must be greater than low threshold."
+        )
 
     if complexity <= low_threshold:
         return levels[0]
@@ -172,6 +191,17 @@ def adaptive_quantize_patch(patch, levels, thresholds):
         quantized_patch, quantization_level, integer_indices, complexity
     """
     patch_array = np.asarray(patch, dtype=np.float32)
+    if patch_array.ndim != 2:
+        raise ValueError(
+            f"Expected a 2-D patch, received shape {patch_array.shape}."
+        )
+    if not np.all(np.isfinite(patch_array)):
+        raise ValueError("Patch contains non-finite values.")
+    if np.any(patch_array < 0.0) or np.any(patch_array > 1.0):
+        raise ValueError(
+            "Adaptive quantization expects normalized pixel values in [0, 1]."
+        )
+
     complexity = float(np.var(patch_array))
     selected_levels = adaptive_quantization_level(
         complexity,

@@ -61,24 +61,21 @@ QUANTUM_SEED = 2026
 # ============================================================
 
 RESEARCH_CONFIG = {
-    # Accuracy-first policy:
-    # ------------------------------------------------------------
-    # We keep the original N=50 information fidelity for the final
-    # comparison. Lowering N or replacing exact cache hits by approximate
-    # prototype reuse can change the quantum features in ways that are not
-    # reliably accuracy-preserving. Those ideas remain available for later
-    # resource-efficiency ablations.
-    "adaptive_quantization": False,
+    # Report-aligned resource-aware run:
+    # all five proposed research mechanisms are ACTIVE.
+    # Adaptive quantization, similarity-aware memoization and adaptive shots
+    # are enabled for the same fixed quantum circuits used by each model.
+    "adaptive_quantization": True,
     "quantization_levels": (10, 25, 50),
 
-    # Exact memoization is safe because identical quantized patches receive
-    # exactly the same fixed quantum computation. Approximate reuse is off in
-    # the accuracy-first run.
-    "similarity_memoization": False,
+    # Similarity-aware memoization is enabled after exact-cache misses.
+    # Candidate reuse is validated for a bounded number of cache events before
+    # being accepted, keeping approximation under control.
+    "similarity_memoization": True,
     "similarity_threshold": 0.05,
     "similarity_coarse_levels": 8,
     "max_prototypes_per_bucket": 32,
-    "similarity_validation_limit": 0,
+    "similarity_validation_limit": 64,
     "similarity_output_tolerance": 0.05,
 
     # 3) Diversity-aware selection of the eight quantum filters.
@@ -95,10 +92,9 @@ RESEARCH_CONFIG = {
     # Every feature still appears at least once and L stays fixed by YAML.
     "information_aware_gates": True,
 
-    # Keep the final quantum feature measurement at the configured 1000 shots
-    # for accuracy/reproducibility. Adaptive shot reduction is a resource
-    # experiment, not part of the accuracy-first result.
-    "adaptive_shots": False,
+    # Adaptive measurement: lower-precision patches use fewer shots while
+    # high-precision patches retain the full measurement budget.
+    "adaptive_shots": True,
     "shots_by_level": {
         10: 250,
         25: 500,
@@ -273,6 +269,63 @@ def load_dataset():
 
 
 # ============================================================
+# REPORT / CODE COMPATIBILITY CHECKS
+# ============================================================
+
+def validate_report_alignment(encoding, quanv_config, kernel_size):
+    """Validate and normalize the report-defined integrated-encoding contract."""
+    encoding_name = getattr(encoding, "value", encoding)
+    if str(encoding_name).lower() != "integrated":
+        return
+
+    expected_l = 2 * int(kernel_size) ** 2
+    configured_l = int(quanv_config.get("L", expected_l))
+
+    # The report defines L=2*k^2 for integrated encoding. Normalize the runtime
+    # configuration here so an older YAML value cannot silently invalidate the
+    # reported method. The final configuration is then validated below.
+    if configured_l != expected_l:
+        print(
+            f"WARNING: overriding configured L={configured_l} with "
+            f"report-aligned L={expected_l} for k={kernel_size}."
+        )
+        quanv_config["L"] = expected_l
+
+    if int(quanv_config["L"]) != expected_l:
+        raise ValueError(
+            "Integrated encoding gate-budget validation failed: "
+            f"expected L={expected_l}, got {quanv_config['L']}."
+        )
+
+    levels = tuple(sorted(int(x) for x in RESEARCH_CONFIG["quantization_levels"]))
+    if levels != (10, 25, 50):
+        raise ValueError(
+            "Report/code mismatch: adaptive quantization must use N={10,25,50}."
+        )
+
+    required_shots = {10: 250, 25: 500, 50: 1000}
+    actual_shots = {
+        int(k): int(v)
+        for k, v in RESEARCH_CONFIG["shots_by_level"].items()
+    }
+    if actual_shots != required_shots:
+        raise ValueError(
+            "Report/code mismatch: adaptive shots must be {10:250, 25:500, 50:1000}."
+        )
+
+    if not RESEARCH_CONFIG["adaptive_quantization"]:
+        raise ValueError("Adaptive quantization is disabled in the active configuration.")
+    if not RESEARCH_CONFIG["similarity_memoization"]:
+        raise ValueError("Similarity-aware memoization is disabled in the active configuration.")
+    if not RESEARCH_CONFIG["filter_selection"]:
+        raise ValueError("Diversity-aware filter selection is disabled in the active configuration.")
+    if not RESEARCH_CONFIG["information_aware_gates"]:
+        raise ValueError("Information-aware gate allocation is disabled in the active configuration.")
+    if not RESEARCH_CONFIG["adaptive_shots"]:
+        raise ValueError("Adaptive measurement shots are disabled in the active configuration.")
+
+
+# ============================================================
 # MAIN
 # ============================================================
 
@@ -292,6 +345,12 @@ def main():
     print(f"CLASSICAL SEEDS: {SEEDS}")
     print(f"FIXED QUANTUM SEED: {QUANTUM_SEED}")
     print(f"EPOCHS: {EPOCHS}")
+    print("RESOURCE-AWARE METHODS: all five ENABLED")
+    print("  - Adaptive quantization: N={10,25,50}")
+    print("  - Similarity-aware memoization: enabled + validation")
+    print("  - Diversity-aware filter selection: enabled")
+    print("  - Information-aware gate allocation: enabled")
+    print("  - Adaptive measurement shots: 250/500/1000")
     print("=" * 70)
 
     train_loader, test_loader, _ = load_dataset()
@@ -351,6 +410,14 @@ def main():
         model_config["fc2"]["out_features"] = (
             2 if SELECTED_TASK == "MiraBest" else 7
         )
+
+        if quanv_config is not None and encoding == "integrated":
+            kernel_size = int(quanv_config["kernel_size"])
+            validate_report_alignment(
+                encoding,
+                quanv_config,
+                kernel_size,
+            )
 
         config_path = os.path.join(
             TASK_PATH,
@@ -436,7 +503,7 @@ def main():
             continue
 
         # ====================================================
-        # RNDMUL TRAINING-ONLY ANALYSIS
+        # TRAINING-ONLY DATA-AWARE CALIBRATION
         # ====================================================
 
         if analysis is None:
@@ -475,7 +542,7 @@ def main():
             )
 
         # ====================================================
-        # FIXED QUANTUM FEATURE EXTRACTOR
+        # REPORT-ALIGNED QUANTUM FEATURE EXTRACTOR
         # ====================================================
 
         kernel_size = int(quanv_config["kernel_size"])
@@ -487,6 +554,7 @@ def main():
             kernel_size=kernel_size,
             stride=1,
             padding=padding,
+            # Used only as a fallback when adaptive quantization is disabled.
             quantization=QUANTIZATION,
             encoding_approach=encoding,
             encoding_config=quanv_config,
@@ -520,7 +588,7 @@ def main():
             )
             continue
 
-        print("\nRunning ONE quantum preprocessing pass...")
+        print("\nRunning ONE data-aware quantum preprocessing pass...")
 
         preprocessed_train_loader = (
             preprocessing_model.quanv_preprocess(

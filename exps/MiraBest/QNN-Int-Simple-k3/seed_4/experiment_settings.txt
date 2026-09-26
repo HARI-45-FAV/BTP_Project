@@ -16,13 +16,13 @@ n_qubits: 4
 n_shots: 1000
 
 Research configuration:
-adaptive_quantization: False
+adaptive_quantization: True
 quantization_levels: (10, 25, 50)
-similarity_memoization: False
+similarity_memoization: True
 similarity_threshold: 0.05
 similarity_coarse_levels: 8
 max_prototypes_per_bucket: 32
-similarity_validation_limit: 0
+similarity_validation_limit: 64
 similarity_output_tolerance: 0.05
 filter_selection: True
 filter_candidates: 32
@@ -30,6 +30,6 @@ filter_screening_shots: 250
 filter_quality_weight: 0.65
 filter_diversity_weight: 0.35
 information_aware_gates: True
-adaptive_shots: False
+adaptive_shots: True
 shots_by_level: {10: 250, 25: 500, 50: 1000}
 quantum_seed: 2026

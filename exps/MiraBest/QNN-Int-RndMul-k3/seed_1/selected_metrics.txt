@@ -1,4 +1,4 @@
 selection_protocol=final_epoch
 final_epoch=1000
-final_test_loss=0.758936460916098
-final_test_accuracy=88.31168831168831
+final_test_loss=0.938367232099756
+final_test_accuracy=76.62337662337663

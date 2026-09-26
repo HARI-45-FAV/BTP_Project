@@ -142,6 +142,83 @@ class QuanvolutionalLayer(nn.Module):
         self.filter_calibration_labels = filter_calibration_labels or []
 
         # ---------------------------------------------------------
+        # Report-aligned research validation
+        # ---------------------------------------------------------
+        if self.in_channels != 1:
+            raise ValueError(
+                "The current report-aligned implementation expects exactly "
+                "one input channel."
+            )
+        if self.out_channels < 1:
+            raise ValueError("out_channels must be at least 1.")
+        if self.kernel_size < 1 or self.stride < 1:
+            raise ValueError("kernel_size and stride must be positive integers.")
+
+        if len(self.adaptive_levels) != 3 or len(set(self.adaptive_levels)) != 3:
+            raise ValueError(
+                "Adaptive quantization requires three distinct levels, "
+                "expected {10, 25, 50}."
+            )
+        if self.adaptive_levels != tuple(sorted(self.adaptive_levels)):
+            raise ValueError("quantization_levels must be sorted in ascending order.")
+        if self.adaptive_levels != (10, 25, 50):
+            raise ValueError(
+                "Report-aligned adaptive quantization requires N={10,25,50}."
+            )
+
+        if self.adaptive_quantization and self.quantization_thresholds is None:
+            raise ValueError(
+                "Adaptive quantization is enabled but training-derived "
+                "quantization_thresholds were not supplied."
+            )
+
+        if self.similarity_threshold < 0.0 or self.similarity_threshold > 1.0:
+            raise ValueError("similarity_threshold must be in [0, 1].")
+        if self.similarity_coarse_levels < 2:
+            raise ValueError("similarity_coarse_levels must be at least 2.")
+        if self.max_prototypes_per_bucket < 1:
+            raise ValueError("max_prototypes_per_bucket must be at least 1.")
+        if self.similarity_validation_limit < 0:
+            raise ValueError("similarity_validation_limit cannot be negative.")
+        if self.similarity_output_tolerance < 0.0:
+            raise ValueError("similarity_output_tolerance cannot be negative.")
+
+        expected_shots = {10: 250, 25: 500, 50: 1000}
+        if set(self.shots_by_level) != set(self.adaptive_levels):
+            raise ValueError(
+                "shots_by_level must define a shot count for every adaptive "
+                "quantization level."
+            )
+        if any(int(value) < 1 for value in self.shots_by_level.values()):
+            raise ValueError("All measurement shot counts must be positive integers.")
+        if self.adaptive_shots and self.shots_by_level != expected_shots:
+            raise ValueError(
+                "Report-aligned adaptive measurement requires "
+                "shots {10: 250, 25: 500, 50: 1000}."
+            )
+
+        if self.similarity_memoization and not self.adaptive_quantization and self.quantization is None:
+            raise ValueError(
+                "Similarity-aware memoization requires a quantized patch "
+                "representation (adaptive or fixed quantization)."
+            )
+        if self.filter_selection_enabled:
+            if self.filter_candidates < self.out_channels:
+                raise ValueError(
+                    "filter_candidates must be at least out_channels when "
+                    "filter selection is enabled."
+                )
+            if len(self.filter_calibration_patches) != len(self.filter_calibration_labels):
+                raise ValueError(
+                    "Filter calibration patches and labels must have the same length."
+                )
+            if self.encoding_approach == constants.CircuitEncoding.INTEGRATED and not self.filter_calibration_patches:
+                raise ValueError(
+                    "Diversity-aware filter selection requires training-only "
+                    "calibration patches."
+                )
+
+        # ---------------------------------------------------------
         # Memoization structures
         # ---------------------------------------------------------
         self.look_up = {}
@@ -159,10 +236,11 @@ class QuanvolutionalLayer(nn.Module):
             "similarity_validation_failures": 0,
             "similarity_prototypes": 0,
             "screening_executions": 0,
-            "shots_250": 0,
-            "shots_500": 0,
-            "shots_1000": 0,
         }
+        for shot_count in sorted(set(self.shots_by_level.values())):
+            self.counters[f"shots_{int(shot_count)}"] = 0
+        for level in self.adaptive_levels:
+            self.counters[f"patches_N_{int(level)}"] = 0
 
         self.filter_selection_summary = {}
 
@@ -189,6 +267,15 @@ class QuanvolutionalLayer(nn.Module):
 
     def _prepare_patch(self, patch):
         patch = np.asarray(patch, dtype=np.float32)
+
+        expected_shape = (self.kernel_size, self.kernel_size)
+        if patch.shape != expected_shape:
+            raise ValueError(
+                f"Patch shape {patch.shape} does not match expected "
+                f"kernel shape {expected_shape}."
+            )
+        if not np.all(np.isfinite(patch)):
+            raise ValueError("Patch contains non-finite values before quantization.")
 
         if self.adaptive_quantization:
             if self.quantization_thresholds is None:
@@ -230,15 +317,22 @@ class QuanvolutionalLayer(nn.Module):
             self.encoding_config = config
 
         fallback_shots = int(config.get("n_shots", 1024))
+        if fallback_shots < 1:
+            raise ValueError("The configured fallback number of shots must be positive.")
 
         if not self.adaptive_shots or levels is None:
             return fallback_shots
 
-        if int(levels) in self.shots_by_level:
-            return int(self.shots_by_level[int(levels)])
+        try:
+            selected_shots = int(self.shots_by_level[int(levels)])
+        except KeyError as exc:
+            raise ValueError(
+                f"No adaptive shot count configured for quantization level {levels}."
+            ) from exc
 
-        # Safe fallback: use the configured maximum shot count.
-        return fallback_shots
+        if selected_shots < 1:
+            raise ValueError("Adaptive measurement shots must be positive.")
+        return selected_shots
 
     # =============================================================
     # SIMILARITY MEMOIZATION
@@ -432,6 +526,10 @@ class QuanvolutionalLayer(nn.Module):
                         # count each spatial patch once rather than once per filter.
                         if j == 0:
                             self.counters["total_patches"] += 1
+                            if levels is not None:
+                                level_key = f"patches_N_{int(levels)}"
+                                if level_key in self.counters:
+                                    self.counters[level_key] += 1
 
                         value = self.look_up.get(patch_key)
                         if value is not None:
@@ -587,8 +685,15 @@ class QuanvolutionalLayer(nn.Module):
                         tuple(patch.reshape(-1).tolist()),
                     )
 
+                    if circuit_index == 0 and levels is not None:
+                        level_key = f"patches_N_{int(levels)}"
+                        if level_key in self.counters:
+                            self.counters[level_key] += 1
+
                     value = self.look_up.get(patch_key)
-                    if value is None:
+                    if value is not None:
+                        self.counters["exact_cache_hits"] += 1
+                    else:
                         value = self._find_similar_prototype(
                             circuit_index,
                             levels,
@@ -602,6 +707,10 @@ class QuanvolutionalLayer(nn.Module):
                             patch,
                             shots,
                         )
+                        if value is None:
+                            raise RuntimeError(
+                                "Quantum execution returned no value"
+                            )
                         self.counters["quantum_executions"] += 1
                         self._record_shot_count(shots)
                         self.look_up[patch_key] = value
@@ -612,9 +721,11 @@ class QuanvolutionalLayer(nn.Module):
                             indices,
                             value,
                         )
-                    else:
+                    elif value is not None:
                         self.counters["similarity_cache_hits"] += 1
 
+                    if value is None:
+                        raise RuntimeError("Unable to obtain quantum value")
                     output[i, 0, h, w] = value
 
         return output
@@ -875,10 +986,17 @@ class QuanvolutionalLayer(nn.Module):
                 self.encoding_approach
             )
 
-        shots = self.encoding_config.get("n_shots", 1)
+        prepared_patch, levels, _indices, _complexity, shots = self._prepare_patch(
+            np.asarray(patch, dtype=np.float32)
+        )
+        if prepared_patch.reshape(-1).shape[0] != self.kernel_size ** 2:
+            raise ValueError(
+                "Patch size does not match the configured quantum kernel."
+            )
+
         return self._execute_quantum(
             circuit,
-            np.asarray(patch, dtype=np.float32),
+            prepared_patch,
             int(shots),
         )
 
