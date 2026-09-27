@@ -1,0 +1,8 @@
+Task: MNIST
+Model: CNN
+Seed: 2
+Device: cuda
+Epochs: 50
+Learning rate: 0.0003
+Training protocol: full original training split; no validation split; no early stopping.
+Test metrics are reported at selected diagnostic epochs and final epoch.

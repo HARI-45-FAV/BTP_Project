@@ -1,0 +1,35 @@
+Task: MNIST
+Model: QNN-Int-Simple-k3
+Seed: 7
+Device: cuda
+Quantum preprocessing: fixed/shared across seeds
+Quantum seed: 2026
+Training protocol: full original training split; no validation split; no early stopping.
+Epochs: 50
+Learning rate: 0.0003
+
+Quantum configuration:
+L: 18
+activation: Fixed
+kernel_size: 3
+n_qubits: 4
+n_shots: 1000
+
+Research configuration:
+adaptive_quantization: True
+quantization_levels: (10, 25, 50)
+similarity_memoization: True
+similarity_threshold: 0.08
+similarity_coarse_levels: 8
+max_prototypes_per_bucket: 32
+similarity_validation_limit: 64
+similarity_output_tolerance: 0.05
+filter_selection: True
+filter_candidates: 16
+filter_screening_shots: 250
+filter_quality_weight: 0.65
+filter_diversity_weight: 0.35
+information_aware_gates: True
+adaptive_shots: True
+shots_by_level: {10: 250, 25: 500, 50: 1000}
+quantum_seed: 2026

@@ -1,0 +1,125 @@
+{
+  "task": "MNIST",
+  "model": "QNN-Int-Simple-k3",
+  "quantum_seed": 2026,
+  "classical_seeds": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9
+  ],
+  "epochs": 50,
+  "research_config": {
+    "adaptive_quantization": true,
+    "quantization_levels": [
+      10,
+      25,
+      50
+    ],
+    "similarity_memoization": true,
+    "similarity_threshold": 0.08,
+    "similarity_coarse_levels": 8,
+    "max_prototypes_per_bucket": 32,
+    "similarity_validation_limit": 64,
+    "similarity_output_tolerance": 0.05,
+    "filter_selection": true,
+    "filter_candidates": 16,
+    "filter_screening_shots": 250,
+    "filter_quality_weight": 0.65,
+    "filter_diversity_weight": 0.35,
+    "information_aware_gates": true,
+    "adaptive_shots": true,
+    "shots_by_level": {
+      "10": 250,
+      "25": 500,
+      "50": 1000
+    },
+    "quantum_seed": 2026
+  },
+  "feature_importance": [
+    0.11118536137305823,
+    0.11119267995619991,
+    0.11119267995619991,
+    0.11106667062091397,
+    0.1110739843681785,
+    0.1110739843681785,
+    0.11106667062091397,
+    0.1110739843681785,
+    0.1110739843681785
+  ],
+  "quantization_thresholds": [
+    0.0,
+    0.0678713332861662
+  ],
+  "num_training_patches_analyzed": 704700,
+  "filter_selection_summary": {
+    "enabled": true,
+    "candidate_count": 16,
+    "selected_indices": [
+      9,
+      12,
+      8,
+      11,
+      14,
+      6,
+      5,
+      1
+    ],
+    "selected_quality_scores": [
+      0.08587013051468038,
+      0.048333642258637816,
+      0.047916213448159946,
+      0.03977973772130132,
+      0.03798738102569269,
+      0.035576574772151544,
+      0.029841347224579366,
+      0.03232612119627217
+    ],
+    "quality_scores": [
+      0.02243756206646091,
+      0.03232612119627217,
+      0.019950817997075994,
+      0.023258153507209254,
+      0.025485656027047138,
+      0.029841347224579366,
+      0.035576574772151544,
+      0.03055817579854562,
+      0.047916213448159946,
+      0.08587013051468038,
+      0.03158027805217936,
+      0.03977973772130132,
+      0.048333642258637816,
+      0.007824654120129568,
+      0.03798738102569269,
+      0.014417502750345703
+    ],
+    "quality_weight": 0.65,
+    "diversity_weight": 0.35,
+    "screening_shots": 250,
+    "calibration_patches": 64
+  },
+  "counters": {
+    "images": 1045,
+    "total_patches": 940500,
+    "unique_patches": 50476,
+    "quantum_executions": 404299,
+    "exact_cache_hits": 5739080,
+    "similarity_cache_hits": 1380685,
+    "similarity_validations": 64,
+    "similarity_validation_failures": 19,
+    "similarity_prototypes": 13548,
+    "screening_executions": 1024,
+    "shots_250": 16,
+    "shots_500": 123604,
+    "shots_1000": 280679,
+    "patches_N_10": 590767,
+    "patches_N_25": 208929,
+    "patches_N_50": 140804
+  }
+}

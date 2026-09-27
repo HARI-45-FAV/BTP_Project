@@ -40,7 +40,16 @@ class QuanvolutionalLayer(nn.Module):
         super(QuanvolutionalLayer, self).__init__()
 
         if simulator == QuantumDevice.NOISELESS:
-            self.simulator = AerSimulator(method="statevector")
+            available_devices = AerSimulator().available_devices()
+            aer_device = "GPU" if "GPU" in available_devices else "CPU"
+            simulator_options = {
+                "method": "statevector",
+                "device": aer_device,
+            }
+            if aer_device == "GPU":
+                simulator_options["cuStateVec_enable"] = True
+            self.simulator = AerSimulator(**simulator_options)
+            print(f"Qiskit Aer simulator device: {aer_device}")
             self.need_to_transpile = False
         else:
             raise Exception(f"Simulator '{simulator}' not recognized.")
@@ -184,6 +193,7 @@ class QuanvolutionalLayer(nn.Module):
             raise ValueError("similarity_output_tolerance cannot be negative.")
 
         expected_shots = {10: 250, 25: 500, 50: 1000}
+        fast_run = bool(research_config.get("fast_run", False))
         if set(self.shots_by_level) != set(self.adaptive_levels):
             raise ValueError(
                 "shots_by_level must define a shot count for every adaptive "
@@ -191,7 +201,11 @@ class QuanvolutionalLayer(nn.Module):
             )
         if any(int(value) < 1 for value in self.shots_by_level.values()):
             raise ValueError("All measurement shot counts must be positive integers.")
-        if self.adaptive_shots and self.shots_by_level != expected_shots:
+        if (
+            self.adaptive_shots
+            and self.shots_by_level != expected_shots
+            and not fast_run
+        ):
             raise ValueError(
                 "Report-aligned adaptive measurement requires "
                 "shots {10: 250, 25: 500, 50: 1000}."

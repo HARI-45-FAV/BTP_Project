@@ -23,9 +23,12 @@ class CNN(nn.Module):
         self.config = config
 
         self.conv1 = nn.Conv2d(**config['conv1'])
+        self.bn1 = nn.BatchNorm2d(config['conv1']['out_channels'])
         self.conv2 = None
+        self.bn2 = None
         if 'conv2' in config:
             self.conv2 = nn.Conv2d(**config['conv2'])
+            self.bn2 = nn.BatchNorm2d(config['conv2']['out_channels'])
 
         self.pool = nn.MaxPool2d(kernel_size=2, stride=2)
 
@@ -42,11 +45,11 @@ class CNN(nn.Module):
         self.fc2 = nn.Linear(config['fc1']['out_features'], config['fc2']['out_features'])
 
     def forward(self, x):
-        x = self.pool(F.relu(self.conv1(x)))
+        x = self.pool(F.relu(self.bn1(self.conv1(x))))
         if self.dropout_conv is not None:
             x = self.dropout_conv(x)
         if self.conv2 is not None:
-            x = self.pool(F.relu(self.conv2(x)))
+            x = self.pool(F.relu(self.bn2(self.conv2(x))))
             if self.dropout_conv is not None:
                 x = self.dropout_conv(x)
         x = x.view(x.size(0), -1)
@@ -63,9 +66,9 @@ class CNN(nn.Module):
         # Temporarily forward pass through conv and pooling layers to find the input size to the first FC layer
         dummy_data = torch.zeros(1, *input_shape)  # Batch size of 1
         with torch.no_grad():
-            dummy_data = self.pool(F.relu(self.conv1(dummy_data)))
+            dummy_data = self.pool(F.relu(self.bn1(self.conv1(dummy_data))))
             if self.conv2 is not None:
-                dummy_data = self.pool(F.relu(self.conv2(dummy_data)))
+                dummy_data = self.pool(F.relu(self.bn2(self.conv2(dummy_data))))
         return int(torch.numel(dummy_data))
     
     def describe_architecture(self):
@@ -214,3 +217,20 @@ def stack_quanv_on_top(quanv, model, verbose=False):
         
     quanv_model = QuanvNN(model, quanv)
     return quanv_model
+
+
+if __name__ == "__main__":
+    print("Running standalone test block for architecture validation...")
+    config = get_default_model_config()
+    config['input_shape'] = (8, 30, 30)
+    config['conv1']['in_channels'] = 8
+    config['fc2']['out_features'] = 10
+    
+    device = torch.device('cpu')
+    model = CNN(device, config=config)
+    
+    dummy_input = torch.randn(16, 8, 30, 30)
+    output = model(dummy_input)
+    
+    assert output.shape == (16, 10), f"Expected shape (16, 10), but got {output.shape}"
+    print(f"Test passed: Final classification output shape is {output.shape}")

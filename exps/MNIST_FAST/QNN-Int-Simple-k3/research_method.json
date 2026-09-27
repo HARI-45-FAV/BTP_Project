@@ -1,0 +1,75 @@
+{
+  "task": "MNIST",
+  "model": "QNN-Int-Simple-k3",
+  "quantum_seed": 2026,
+  "classical_seeds": [
+    0
+  ],
+  "epochs": 2,
+  "research_config": {
+    "adaptive_quantization": true,
+    "quantization_levels": [
+      10,
+      25,
+      50
+    ],
+    "similarity_memoization": true,
+    "similarity_threshold": 0.08,
+    "similarity_coarse_levels": 8,
+    "max_prototypes_per_bucket": 32,
+    "similarity_validation_limit": 64,
+    "similarity_output_tolerance": 0.05,
+    "filter_selection": false,
+    "filter_candidates": 16,
+    "filter_screening_shots": 100,
+    "filter_quality_weight": 0.65,
+    "filter_diversity_weight": 0.35,
+    "information_aware_gates": true,
+    "adaptive_shots": true,
+    "shots_by_level": {
+      "10": 50,
+      "25": 100,
+      "50": 200
+    },
+    "quantum_seed": 2026,
+    "fast_run": true
+  },
+  "feature_importance": [
+    0.11131528647012594,
+    0.11131528647012594,
+    0.11131528647012594,
+    0.1110090234316037,
+    0.1110090234316037,
+    0.1110090234316037,
+    0.1110090234316037,
+    0.1110090234316037,
+    0.1110090234316037
+  ],
+  "quantization_thresholds": [
+    0.0,
+    0.06751984879374505
+  ],
+  "num_training_patches_analyzed": 57600,
+  "filter_selection_summary": {
+    "enabled": false,
+    "reason": "Filter selection disabled or not applicable."
+  },
+  "counters": {
+    "images": 96,
+    "total_patches": 86400,
+    "unique_patches": 6254,
+    "quantum_executions": 12563,
+    "exact_cache_hits": 125588,
+    "similarity_cache_hits": 34713,
+    "similarity_validations": 64,
+    "similarity_validation_failures": 17,
+    "similarity_prototypes": 2795,
+    "screening_executions": 0,
+    "shots_50": 4,
+    "shots_100": 4005,
+    "shots_200": 8554,
+    "patches_N_10": 54480,
+    "patches_N_25": 18879,
+    "patches_N_50": 13041
+  }
+}

@@ -1,0 +1,4 @@
+{'L': 18, 'activation': 'Fixed', 'kernel_size': 3, 'n_qubits': 4, 'n_shots': 1000}
+{'images': 96, 'total_patches': 86400, 'unique_patches': 6254, 'quantum_executions': 12563, 'exact_cache_hits': 125588, 'similarity_cache_hits': 34713, 'similarity_validations': 64, 'similarity_validation_failures': 17, 'similarity_prototypes': 2795, 'screening_executions': 0, 'shots_50': 4, 'shots_100': 4005, 'shots_200': 8554, 'patches_N_10': 54480, 'patches_N_25': 18879, 'patches_N_50': 13041}
+{'L': 18, 'activation': 'Fixed', 'kernel_size': 3, 'n_qubits': 4, 'n_shots': 1000}
+{'enabled': False, 'reason': 'Filter selection disabled or not applicable.'}

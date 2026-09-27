@@ -14,7 +14,8 @@ from quanvs.Quanvolutional_Layer import QuanvolutionalLayer
 from quanvs.model_builder import stack_quanv_on_top
 
 from utils.read_config import load_config
-from utils.get_dataset.dataset_Mirabest import get_MiraBest_binary
+# from utils.get_dataset.dataset_Mirabest import get_MiraBest_binary
+from utils.get_dataset.dataset_MNIST import get_MNIST_full
 from utils.get_dataset.dataset_LArTPC import get_LArTPC_full
 
 from utils.train_and_test import train, test
@@ -26,7 +27,10 @@ from quanvs.quanv_util import analyze_training_patches
 # ============================================================
 
 DEBUG_MODE = False
-SELECTED_TASK = "MiraBest"
+SELECTED_TASK = "MNIST"  # Originally "MiraBest"
+FAST_RUN = os.environ.get("FAST_RUN", "0").strip().lower() in {
+    "1", "true", "yes", "on"
+}
 
 # Run the complete fair comparison in one invocation.
 # CNN is the unchanged classical baseline; the two QNN variants share the
@@ -37,7 +41,7 @@ CONFIGURATIONS_TO_RUN = (
     "QNN-Int-RndMul-k3",
 )
 
-# Ten independent classical seeds.
+# Ten independent classical seeds for statistically robust results.
 SEEDS = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
 
 # Fallback only when adaptive quantization is disabled.
@@ -48,7 +52,15 @@ N_QUANV_CHANNELS = 8
 
 # Final-comparison training budget.
 # Keep the same budget for CNN, Simple and RndMul.
-EPOCHS = 1000
+EPOCHS = 50  # Reduced from 1000 for MNIST
+
+if FAST_RUN:
+    # Small, isolated smoke run. These settings are not intended for reported
+    # accuracy; they make it practical to validate the full QNN pipeline.
+    CONFIGURATIONS_TO_RUN = ("QNN-Int-Simple-k3",)
+    SEEDS = [0]
+    N_QUANV_CHANNELS = 2
+    EPOCHS = 2
 
 LEARNING_RATE = 0.0003
 
@@ -72,7 +84,7 @@ RESEARCH_CONFIG = {
     # Candidate reuse is validated for a bounded number of cache events before
     # being accepted, keeping approximation under control.
     "similarity_memoization": True,
-    "similarity_threshold": 0.05,
+    "similarity_threshold": 0.08,
     "similarity_coarse_levels": 8,
     "max_prototypes_per_bucket": 32,
     "similarity_validation_limit": 64,
@@ -82,9 +94,9 @@ RESEARCH_CONFIG = {
     # More candidates + stronger screening gives the selector a better chance
     # of finding useful and non-redundant filters without changing the final
     # architecture (still exactly 8 output channels).
-    "filter_selection": True,
-    "filter_candidates": 32,
-    "filter_screening_shots": 250,
+    "filter_selection": not FAST_RUN,
+    "filter_candidates": 16,  # Reduced from 32 for speed
+    "filter_screening_shots": 100 if FAST_RUN else 250,
     "filter_quality_weight": 0.65,
     "filter_diversity_weight": 0.35,
 
@@ -96,12 +108,13 @@ RESEARCH_CONFIG = {
     # high-precision patches retain the full measurement budget.
     "adaptive_shots": True,
     "shots_by_level": {
-        10: 250,
-        25: 500,
-        50: 1000,
+        10: 50 if FAST_RUN else 250,
+        25: 100 if FAST_RUN else 500,
+        50: 200 if FAST_RUN else 1000,
     },
 
     "quantum_seed": QUANTUM_SEED,
+    "fast_run": FAST_RUN,
 }
 
 
@@ -109,7 +122,7 @@ RESEARCH_CONFIG = {
 # OUTPUT DIRECTORY
 # ============================================================
 
-TASK_PATH = f"exps/{SELECTED_TASK}"
+TASK_PATH = f"exps/{SELECTED_TASK}{'_FAST' if FAST_RUN else ''}"
 os.makedirs(TASK_PATH, exist_ok=True)
 
 
@@ -259,12 +272,20 @@ def load_dataset():
             autocrop=False,
         )
 
-    if SELECTED_TASK == "MiraBest":
-        return get_MiraBest_binary()
+    # if SELECTED_TASK == "MiraBest":
+    #     return get_MiraBest_binary()
+
+    if SELECTED_TASK == "MNIST":
+        if FAST_RUN:
+            print("FAST_RUN enabled: MNIST subset 64/32, batch size 8, 2 quanvolution channels, 2 epochs.")
+            return get_MNIST_full(batch_size=8, train_subset=64, test_subset=32)
+        # 783 train / 262 test matches original MiraBest quantum pipeline design budget.
+        # CNN and QNN are evaluated on the same training size for a fair comparison.
+        return get_MNIST_full(batch_size=256, train_subset=783, test_subset=262)
 
     raise ValueError(
         f"Unknown task: {SELECTED_TASK}. "
-        f"Use 'MiraBest' or 'LArTPC'."
+        f"Use 'MiraBest', 'LArTPC', or 'MNIST'."
     )
 
 
@@ -296,6 +317,11 @@ def validate_report_alignment(encoding, quanv_config, kernel_size):
             "Integrated encoding gate-budget validation failed: "
             f"expected L={expected_l}, got {quanv_config['L']}."
         )
+
+    # FAST_RUN is a pipeline smoke test and intentionally relaxes the
+    # report-specific shot/method checks while preserving the encoding budget.
+    if FAST_RUN:
+        return
 
     levels = tuple(sorted(int(x) for x in RESEARCH_CONFIG["quantization_levels"]))
     if levels != (10, 25, 50):
@@ -345,12 +371,21 @@ def main():
     print(f"CLASSICAL SEEDS: {SEEDS}")
     print(f"FIXED QUANTUM SEED: {QUANTUM_SEED}")
     print(f"EPOCHS: {EPOCHS}")
-    print("RESOURCE-AWARE METHODS: all five ENABLED")
+    print(
+        "RESOURCE-AWARE METHODS: "
+        + ("smoke-test settings" if FAST_RUN else "all five ENABLED")
+    )
     print("  - Adaptive quantization: N={10,25,50}")
     print("  - Similarity-aware memoization: enabled + validation")
-    print("  - Diversity-aware filter selection: enabled")
+    print(
+        "  - Diversity-aware filter selection: "
+        + ("disabled for speed" if FAST_RUN else "enabled")
+    )
     print("  - Information-aware gate allocation: enabled")
-    print("  - Adaptive measurement shots: 250/500/1000")
+    print(
+        "  - Adaptive measurement shots: "
+        + ("50/100/200" if FAST_RUN else "250/500/1000")
+    )
     print("=" * 70)
 
     train_loader, test_loader, _ = load_dataset()
@@ -408,7 +443,7 @@ def main():
         )
 
         model_config["fc2"]["out_features"] = (
-            2 if SELECTED_TASK == "MiraBest" else 7
+            10 if SELECTED_TASK == "MNIST" else (2 if SELECTED_TASK == "MiraBest" else 7)
         )
 
         if quanv_config is not None and encoding == "integrated":
