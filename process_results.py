@@ -6,7 +6,7 @@ import pandas as pd
 # SETTINGS
 # ============================================================
 
-SELECTED_TASK = "MiraBest"
+SELECTED_TASK = "MNIST"
 EXPS_DIR = f"exps/{SELECTED_TASK}"
 
 NUM_SEEDS = 10

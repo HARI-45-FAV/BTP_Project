@@ -40,16 +40,26 @@ class QuanvolutionalLayer(nn.Module):
         super(QuanvolutionalLayer, self).__init__()
 
         if simulator == QuantumDevice.NOISELESS:
-            available_devices = AerSimulator().available_devices()
-            aer_device = "GPU" if "GPU" in available_devices else "CPU"
+            # Force Qiskit Aer to use the NVIDIA GPU.
+            # Do not rely on available_devices(), because in this environment
+            # it reports only CPU even though explicit GPU construction works.
+            aer_device = "GPU"
             simulator_options = {
                 "method": "statevector",
                 "device": aer_device,
+                "cuStateVec_enable": True,
             }
-            if aer_device == "GPU":
-                simulator_options["cuStateVec_enable"] = True
-            self.simulator = AerSimulator(**simulator_options)
-            print(f"Qiskit Aer simulator device: {aer_device}")
+
+            try:
+                self.simulator = AerSimulator(**simulator_options)
+            except Exception as exc:
+                raise RuntimeError(
+                    "Qiskit Aer GPU initialization failed. "
+                    "Verify that the GPU-enabled Aer package and CUDA runtime "
+                    "are available in this environment."
+                ) from exc
+
+            print("Qiskit Aer simulator device: GPU")
             self.need_to_transpile = False
         else:
             raise Exception(f"Simulator '{simulator}' not recognized.")
